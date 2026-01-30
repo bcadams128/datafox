@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"sync"
 	"syscall"
@@ -37,12 +38,22 @@ func main() {
 	var logs = []string{"/var/log/apt/*.log", "/home/ben/logs/*.log"}
 	paths, _ := discover(logs)
 	var wg sync.WaitGroup
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	out := make(chan string, 1000)
 	savedOffsets, err := LoadOffsets("offset.backup")
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		sig := <-sigChan
+		log.Printf("Received signal %v, shutting down...", sig)
+		cancel()
+	}()
 
 	var tailers []*Tailer
 
@@ -85,6 +96,19 @@ func main() {
 	for line := range out {
 		print(line)
 	}
+
+	log.Print("Saving final offsets...")
+	if err := SaveOffsets("offset.backup", TailersToOffsets(tailers)); err != nil {
+		log.Printf("Failed to save final offsets: %v", err)
+	}
+
+	for _, t := range tailers {
+		if err := t.file.Close(); err != nil {
+			log.Printf("Error closing %s: %v", t.path, err)
+		}
+	}
+
+	log.Print("Shutdown complete")
 }
 
 func (t *Tailer) read(out chan<- string) error {

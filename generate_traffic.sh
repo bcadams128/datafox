@@ -3,7 +3,7 @@
 # Script to generate HTTP traffic for nginx log testing
 
 NGINX_URL="http://localhost:8080"
-ITERATIONS=100
+ITERATIONS=20
 SLEEP_BETWEEN=0.5  # seconds
 
 echo "Generating traffic to $NGINX_URL..."
@@ -14,7 +14,7 @@ for i in $(seq 1 $ITERATIONS); do
     curl -s -o /dev/null "$NGINX_URL/index.html" &
 
     # 404s to generate error logs
-    curl -s -o /dev/null "$NGINX_URL/missing-page-$i" &
+    curl -s -o /dev/null "$NGINX_URL/missing-page-$(date +%s)" &
     curl -s -o /dev/null "$NGINX_URL/api/users/$i" &
 
     # Random user agents
