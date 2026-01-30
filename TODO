@@ -1,3 +1,6 @@
 - Add file offset to prevent reading the whole file each poll
-- Figure out reading multiple files.  Use a channel per each?
+-- load offset
+-- add versioning to offset struct
 - Server piece is needed?  Batch and send how often?
+- Figure out reading multiple files.  Use a channel per each?
+

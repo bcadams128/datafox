@@ -5,8 +5,12 @@ import (
 	"context"
 	"io"
 	"os"
+	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
+
+	"github.com/vmihailenco/msgpack/v5"
 )
 
 type Tailer struct {
@@ -17,16 +21,60 @@ type Tailer struct {
 	reader *bufio.Reader
 }
 
+type OffsetState struct {
+	Path   string `msgpack:"Path"`
+	Inode  uint64 `msgpack:"inode"`
+	Offset int64  `msgpack:"Offset"`
+}
+
+type Offset struct {
+	Files map[string]OffsetState
+}
+
 func main() {
-	tailer, err := NewLogTailer("/var/log/apt/term.log")
-	if err != nil {
-		panic(err)
+	var logs = []string{"/var/log/apt/*.log", "/home/ben/logs/*.log"}
+	paths, _ := discover(logs)
+	var wg sync.WaitGroup
+	ctx := context.Background()
+	out := make(chan string, 1000)
+
+	var tailers []*Tailer
+
+	for _, path := range paths {
+		t, err := NewLogTailer(path)
+		if err != nil {
+			panic(err)
+		}
+
+		tailers = append(tailers, t)
+
+		wg.Add(1)
+		go func(t *Tailer) {
+			defer wg.Done()
+			_ = t.Poll(ctx, out)
+		}(t)
+
 	}
 
-	out := make(chan string, 1000)
-	ctx := context.Background()
+	go func() {
+		wg.Wait()
+		close(out)
+	}()
 
-	go tailer.Poll(ctx, out)
+	go func() {
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				SaveOffsets("offset.backup", TailersToOffsets(tailers))
+			}
+
+		}
+	}()
+
 	for line := range out {
 		print(line) // line already has \n from ReadString
 	}
@@ -95,7 +143,7 @@ func NewLogTailer(path string) (*Tailer, error) {
 }
 
 func (t *Tailer) Poll(ctx context.Context, out chan<- string) error {
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
 	for {
@@ -108,4 +156,52 @@ func (t *Tailer) Poll(ctx context.Context, out chan<- string) error {
 			}
 		}
 	}
+}
+
+func discover(globs []string) ([]string, error) {
+	seen := make(map[string]struct{})
+	var files []string
+
+	for _, g := range globs {
+		matches, err := filepath.Glob(g)
+		if err != nil {
+			return nil, err
+		}
+		for _, m := range matches {
+			if _, ok := seen[m]; ok {
+				continue
+			}
+			seen[m] = struct{}{}
+			files = append(files, m)
+		}
+	}
+	return files, nil
+}
+
+func SaveOffsets(path string, db *Offset) error {
+	tmp := path + ".tmp"
+
+	b, err := msgpack.Marshal(db)
+	if err != nil {
+		return err
+	}
+
+	if err := os.WriteFile(tmp, b, 0644); err != nil {
+		return err
+	}
+
+	return os.Rename(tmp, path)
+}
+
+
+func TailersToOffsets(tailers []*Tailer) *Offset {
+	o := &Offset{Files: make(map[string]OffsetState)}
+	for _, t := range tailers {
+		o.Files[t.path] = OffsetState{
+			Path:   t.path,
+			Inode:  t.inode,
+			Offset: t.offset,
+		}
+	}
+	return o
 }
