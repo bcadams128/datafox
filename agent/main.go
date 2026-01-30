@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -28,7 +29,8 @@ type OffsetState struct {
 }
 
 type Offset struct {
-	Files map[string]OffsetState
+	Version int
+	Files   map[string]OffsetState
 }
 
 func main() {
@@ -37,11 +39,16 @@ func main() {
 	var wg sync.WaitGroup
 	ctx := context.Background()
 	out := make(chan string, 1000)
+	savedOffsets, err := LoadOffsets("offset.backup")
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	var tailers []*Tailer
 
 	for _, path := range paths {
-		t, err := NewLogTailer(path)
+		log.Print("Gettings logs from", path)
+		t, err := NewLogTailer(path, savedOffsets)
 		if err != nil {
 			panic(err)
 		}
@@ -76,7 +83,7 @@ func main() {
 	}()
 
 	for line := range out {
-		print(line) // line already has \n from ReadString
+		print(line)
 	}
 }
 
@@ -119,7 +126,7 @@ func (t *Tailer) read(out chan<- string) error {
 	return nil
 }
 
-func NewLogTailer(path string) (*Tailer, error) {
+func NewLogTailer(path string, savedOffsets *Offset) (*Tailer, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -132,11 +139,22 @@ func NewLogTailer(path string) (*Tailer, error) {
 	}
 
 	stat := info.Sys().(*syscall.Stat_t)
+	currentInode := stat.Ino
+
+	var offset int64 = 0
+	if savedState, exists := savedOffsets.Files[path]; exists {
+		if savedState.Inode == currentInode {
+			offset = savedState.Offset
+			if _, err := file.Seek(offset, 0); err != nil {
+				return nil, err
+			}
+		}
+	}
 
 	return &Tailer{
 		path:   path,
 		file:   file,
-		offset: 0,
+		offset: offset,
 		reader: bufio.NewReader(file),
 		inode:  stat.Ino,
 	}, nil
@@ -193,10 +211,43 @@ func SaveOffsets(path string, db *Offset) error {
 	return os.Rename(tmp, path)
 }
 
+func LoadOffsets(path string) (*Offset, error) {
+	log.Print("Checking for existing offsets in:", path)
+	b, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			log.Print("Existing offset not found, creating a new offset state")
+			return &Offset{Files: make(map[string]OffsetState)}, nil
+		}
+		return nil, err
+	}
+
+	var db Offset
+	if err := msgpack.Unmarshal(b, &db); err != nil {
+		return nil, err
+	}
+
+	if db.Files == nil {
+		db.Files = make(map[string]OffsetState)
+	}
+
+	log.Printf("Database version: %d", db.Version)
+
+	if len(db.Files) > 0 {
+		log.Printf("Loaded offsets for %d files:", len(db.Files))
+		for filePath, state := range db.Files {
+			log.Printf("  - %s: offset=%d, inode=%d", filePath, state.Offset, state.Inode)
+		}
+	} else {
+		log.Print("No existing offsets found in backup file")
+	}
+	return &db, nil
+}
 
 func TailersToOffsets(tailers []*Tailer) *Offset {
 	o := &Offset{Files: make(map[string]OffsetState)}
 	for _, t := range tailers {
+		o.Version = 1
 		o.Files[t.path] = OffsetState{
 			Path:   t.path,
 			Inode:  t.inode,

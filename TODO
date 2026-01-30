@@ -1,6 +1,12 @@
-- Add file offset to prevent reading the whole file each poll
--- load offset
--- add versioning to offset struct
-- Server piece is needed?  Batch and send how often?
-- Figure out reading multiple files.  Use a channel per each?
+Agent:
+    - Lifecycle improvements (graceful startup)
+    - Send data to server in batches
+    - Gather metrics from PC
+    - Configuration file / handling
+
+
+
+Server:
+    - Server piece is needed?  Batch and send how often?
+    - Figure out reading multiple files.  Use a channel per each?
 
