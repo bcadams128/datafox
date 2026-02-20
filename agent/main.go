@@ -5,9 +5,11 @@ import (
 	"context"
 	"io"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -36,11 +38,18 @@ type Offset struct {
 
 func main() {
 	var logs = []string{"/var/log/apt/*.log", "/home/ben/logs/*.log"}
-	paths, _ := discover(logs)
 	var wg sync.WaitGroup
+	var batch []string
+
+	paths, _ := discover(logs)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
 	out := make(chan string, 1000)
+
+	batchticker := time.NewTicker(5 * time.Second)
+	defer batchticker.Stop()
+
 	savedOffsets, err := LoadOffsets("offset.backup")
 	if err != nil {
 		log.Fatal(err)
@@ -80,22 +89,42 @@ func main() {
 	}()
 
 	go func() {
-		ticker := time.NewTicker(10 * time.Second)
-		defer ticker.Stop()
+		offsetTicker := time.NewTicker(10 * time.Second)
+		defer offsetTicker.Stop()
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case <-ticker.C:
+			case <-offsetTicker.C:
 				SaveOffsets("offset.backup", TailersToOffsets(tailers))
 			}
 
 		}
 	}()
+	
+	Loop:
+		for {
+			select {
+			case line, ok := <-out:
+				if !ok {
+					if len(batch) > 0 {
+						sendBatch(batch)
+					}
+					break Loop
+				}
+				batch = append(batch, line)
+				if len(batch) >= 10 {
+					sendBatch(batch)
+					batch = nil
+				}
+			case <-batchticker.C:
+				if len(batch) > 0 {
+					sendBatch(batch)
+					batch = nil
+				}
 
-	for line := range out {
-		print(line)
-	}
+			}
+		}	
 
 	log.Print("Saving final offsets...")
 	if err := SaveOffsets("offset.backup", TailersToOffsets(tailers)); err != nil {
@@ -279,4 +308,15 @@ func TailersToOffsets(tailers []*Tailer) *Offset {
 		}
 	}
 	return o
+}
+
+func sendBatch(lines []string) {
+	body := strings.NewReader(strings.Join(lines, ""))
+	resp, err := http.Post("http://localhost:8080/logs", "text/plain", body)
+	if err != nil {
+		log.Printf("failed to send batch: %v", err)
+		return
+	}
+	log.Printf("Sending batch")
+	defer resp.Body.Close()
 }

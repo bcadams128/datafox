@@ -1,12 +1,16 @@
 Agent:
-    - Lifecycle improvements (graceful startup)
     - Send data to server in batches
+    - Re-Oraganize code
+    - Better operational logging
     - Gather metrics from PC
     - Configuration file / handling
+    - Retry and backoff logic
+    - Gzip / msgpack
 
 
 
 Server:
-    - Server piece is needed?  Batch and send how often?
-    - Figure out reading multiple files.  Use a channel per each?
-
+    - Better operational logging 
+    - Save to object storage
+    - Save effeciently
+    
