@@ -2,6 +2,8 @@ package main
 
 import (
 	"bufio"
+	"bytes"
+	"compress/gzip"
 	"context"
 	"io"
 	"log"
@@ -9,7 +11,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -36,16 +37,26 @@ type Offset struct {
 	Files   map[string]OffsetState
 }
 
+type LogBatch struct {
+	Lines    []string          `msgpack:"lines"`
+	Metadata map[string]string `msgpack:"metadata"`
+}
+
+type LogLine struct {
+	Log    string
+	Source string
+}
+
 func main() {
 	var logs = []string{"/var/log/apt/*.log", "/home/ben/logs/*.log"}
 	var wg sync.WaitGroup
-	var batch []string
+	var batch []LogLine
 
 	paths, _ := discover(logs)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	out := make(chan string, 1000)
+	out := make(chan LogLine, 1000)
 
 	batchticker := time.NewTicker(5 * time.Second)
 	defer batchticker.Stop()
@@ -101,30 +112,30 @@ func main() {
 
 		}
 	}()
-	
-	Loop:
-		for {
-			select {
-			case line, ok := <-out:
-				if !ok {
-					if len(batch) > 0 {
-						sendBatch(batch)
-					}
-					break Loop
-				}
-				batch = append(batch, line)
-				if len(batch) >= 10 {
-					sendBatch(batch)
-					batch = nil
-				}
-			case <-batchticker.C:
+
+Loop:
+	for {
+		select {
+		case line, ok := <-out:
+			if !ok {
 				if len(batch) > 0 {
 					sendBatch(batch)
-					batch = nil
 				}
-
+				break Loop
 			}
-		}	
+			batch = append(batch, line)
+			if len(batch) >= 10 {
+				sendBatch(batch)
+				batch = nil
+			}
+		case <-batchticker.C:
+			if len(batch) > 0 {
+				sendBatch(batch)
+				batch = nil
+			}
+
+		}
+	}
 
 	log.Print("Saving final offsets...")
 	if err := SaveOffsets("offset.backup", TailersToOffsets(tailers)); err != nil {
@@ -140,7 +151,7 @@ func main() {
 	log.Print("Shutdown complete")
 }
 
-func (t *Tailer) read(out chan<- string) error {
+func (t *Tailer) read(out chan<- LogLine) error {
 	info, err := os.Stat(t.path)
 	if err != nil {
 		return err
@@ -165,7 +176,7 @@ func (t *Tailer) read(out chan<- string) error {
 			line, err := t.reader.ReadString('\n')
 			if len(line) > 0 {
 				t.offset += int64(len(line))
-				out <- line
+				out <- LogLine{Log: line, Source: t.path}
 			}
 
 			if err == io.EOF {
@@ -213,7 +224,7 @@ func NewLogTailer(path string, savedOffsets *Offset) (*Tailer, error) {
 	}, nil
 }
 
-func (t *Tailer) Poll(ctx context.Context, out chan<- string) error {
+func (t *Tailer) Poll(ctx context.Context, out chan<- LogLine) error {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
@@ -310,13 +321,56 @@ func TailersToOffsets(tailers []*Tailer) *Offset {
 	return o
 }
 
-func sendBatch(lines []string) {
-	body := strings.NewReader(strings.Join(lines, ""))
-	resp, err := http.Post("http://localhost:8080/logs", "text/plain", body)
-	if err != nil {
-		log.Printf("failed to send batch: %v", err)
-		return
+func sendBatch(lines []LogLine) {
+	hostName, _ := os.Hostname()
+
+	grouped := make(map[string][]string)
+	for _, l := range lines {
+		grouped[l.Source] = append(grouped[l.Source], l.Log)
 	}
-	log.Printf("Sending batch")
-	defer resp.Body.Close()
+
+	for source, texts := range grouped {
+		batch := LogBatch{
+			Lines: texts,
+			Metadata: map[string]string{
+				"hostname": hostName,
+				"version":  "0.1.0",
+				"source":   source,
+			},
+		}
+
+		data, err := msgpack.Marshal(&batch)
+		if err != nil {
+			log.Printf("failed to marshal batch: %v", err)
+			continue
+		}
+
+		var buf bytes.Buffer
+		gz := gzip.NewWriter(&buf)
+		gz.Write(data)
+
+		if err := gz.Close(); err != nil {
+			continue
+		}
+
+		req, err := http.NewRequest(http.MethodPost, "http://localhost:8080/logs", &buf)
+
+		if err != nil {
+			continue
+		}
+		
+		req.Header.Set("Content-Type", "application/msgpack")
+		req.Header.Set("Content-Encoding", "gzip")
+
+		resp, err := http.DefaultClient.Do(req)
+
+		if err != nil {
+			log.Printf("failed to send batch: %v", err)
+			return
+		}
+		log.Printf("Sending batch for source %s", source)
+
+		defer resp.Body.Close()
+	}
+
 }

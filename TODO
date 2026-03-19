@@ -1,16 +1,17 @@
 Agent:
-    - Send data to server in batches
-    - Re-Oraganize code
+    - Retry and backoff logic
     - Better operational logging
     - Gather metrics from PC
     - Configuration file / handling
-    - Retry and backoff logic
     - Gzip / msgpack
-
-
+    - Re-Oraganize code
+    - Add metadata to sent logs
 
 Server:
     - Better operational logging 
     - Save to object storage
     - Save effeciently
-    
+
+Both:
+    - Write unit tests
+    - Metrics from both
