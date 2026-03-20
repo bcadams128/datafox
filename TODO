@@ -1,10 +1,8 @@
 Agent:
-    - Retry and backoff logic
     - Better operational logging
     - Gather metrics from PC
     - Configuration file / handling
-    - Gzip / msgpack
-    - Re-Oraganize code
+    - Re-org code
     - Add metadata to sent logs
 
 Server:
@@ -15,3 +13,4 @@ Server:
 Both:
     - Write unit tests
     - Metrics from both
+    - Split into packages

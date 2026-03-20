@@ -5,8 +5,10 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"fmt"
 	"io"
 	"log"
+	"math/rand/v2"
 	"net/http"
 	"os"
 	"os/signal"
@@ -119,18 +121,18 @@ Loop:
 		case line, ok := <-out:
 			if !ok {
 				if len(batch) > 0 {
-					sendBatch(batch)
+					sendWithRetry(batch)
 				}
 				break Loop
 			}
 			batch = append(batch, line)
 			if len(batch) >= 10 {
-				sendBatch(batch)
+				sendWithRetry(batch)
 				batch = nil
 			}
 		case <-batchticker.C:
 			if len(batch) > 0 {
-				sendBatch(batch)
+				sendWithRetry(batch)
 				batch = nil
 			}
 
@@ -321,7 +323,7 @@ func TailersToOffsets(tailers []*Tailer) *Offset {
 	return o
 }
 
-func sendBatch(lines []LogLine) {
+func sendBatch(lines []LogLine) error {
 	hostName, _ := os.Hostname()
 
 	grouped := make(map[string][]string)
@@ -342,23 +344,23 @@ func sendBatch(lines []LogLine) {
 		data, err := msgpack.Marshal(&batch)
 		if err != nil {
 			log.Printf("failed to marshal batch: %v", err)
-			continue
+			return err
 		}
 
 		var buf bytes.Buffer
 		gz := gzip.NewWriter(&buf)
 		gz.Write(data)
-
 		if err := gz.Close(); err != nil {
-			continue
+			return err
 		}
 
-		req, err := http.NewRequest(http.MethodPost, "http://localhost:8080/logs", &buf)
+		payload := buf.Bytes()
+		req, err := http.NewRequest(http.MethodPost, "http://localhost:8080/logs", bytes.NewReader(payload))
 
 		if err != nil {
-			continue
+			return err
 		}
-		
+
 		req.Header.Set("Content-Type", "application/msgpack")
 		req.Header.Set("Content-Encoding", "gzip")
 
@@ -366,11 +368,48 @@ func sendBatch(lines []LogLine) {
 
 		if err != nil {
 			log.Printf("failed to send batch: %v", err)
-			return
+			return err
 		}
 		log.Printf("Sending batch for source %s", source)
 
 		defer resp.Body.Close()
-	}
 
+		if resp.StatusCode == http.StatusServiceUnavailable {
+			return fmt.Errorf("Server Overloaded: %d", resp.StatusCode)
+		}
+
+		if resp.StatusCode >= 500 {
+			return fmt.Errorf("Server Error: %d", resp.StatusCode)
+		}
+
+		if resp.StatusCode >= 400 {
+			return nil
+		}
+	}
+	return nil
+}
+
+func sendWithRetry(lines []LogLine) {
+	backoff := time.Second
+	maxBackoff := 30 * backoff
+
+	for {
+		err := sendBatch(lines)
+
+		if err == nil {
+			return
+		}
+
+		log.Printf("batch failed, retrying in %s: %v", backoff, err)
+		time.Sleep(jitter(backoff))
+
+		backoff *= 2
+		if backoff > maxBackoff {
+			backoff = maxBackoff
+		}
+	}
+}
+
+func jitter(backoff time.Duration) time.Duration {
+	return time.Duration(rand.Int64N(int64(backoff)))
 }
