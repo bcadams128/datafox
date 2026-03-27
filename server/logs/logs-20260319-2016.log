@@ -1,6 +1,0 @@
-2026-03-19T20:16:00-07:00 [DESKTOP-MSN3CK0][/var/log/apt/term.log] update-alternatives: using /usr/bin/vim.basic to provide /usr/bin/vimdiff (vimdiff) in auto mode
-
-2026-03-19T20:16:00-07:00 [DESKTOP-MSN3CK0][/var/log/apt/term.log] Processing triggers for libc-bin (2.36-9+deb12u13) ...
-
-2026-03-19T20:16:00-07:00 [DESKTOP-MSN3CK0][/var/log/apt/term.log] Log ended: 2026-03-19  15:30:36
-

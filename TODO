@@ -1,9 +1,10 @@
 Agent:
-    - Better operational logging
+    - Better operational logging (log levels)
     - Gather metrics from PC
     - Configuration file / handling
-    - Re-org code
+    - Re-org code seperate into smaller functions
     - Add metadata to sent logs
+    - Need to add signal handle to cancel parent context?  (when ctrl-c is used)
 
 Server:
     - Better operational logging 
@@ -14,3 +15,4 @@ Both:
     - Write unit tests
     - Metrics from both
     - Split into packages
+    - find a way to generate logs
