@@ -3,7 +3,6 @@ package main
 import (
 	"compress/gzip"
 	"datafox/server/pkg/disk"
-	"fmt"
 	"io"
 	"net/http"
 
@@ -20,7 +19,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 }
 
 func (s *Server) handlePing(w http.ResponseWriter, r *http.Request) {
-	fmt.Print("Pong")
+	w.Write([]byte("Pong"))
 }
 
 func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
@@ -36,6 +35,7 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 		defer gz.Close()
 		reader = gz
 	}
+	//Reject if not gzip
 
 	var batch disk.LogBatch
 	if err := msgpack.NewDecoder(reader).Decode(&batch); err != nil {
