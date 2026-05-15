@@ -4,6 +4,7 @@ import (
 	"datafox/server/pkg/disk"
 	"log"
 	"net/http"
+	"time"
 )
 
 func main() {
@@ -15,6 +16,7 @@ func main() {
 
 	writer := &disk.DiskWriter{
 		Dir: "./logs",
+		Now: time.Now,
 	}
 
 	go disk.DiskWorker(ingestChan, writer)

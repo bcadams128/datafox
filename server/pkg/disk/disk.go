@@ -17,10 +17,11 @@ type DiskWriter struct {
 	Dir       string
 	current   *os.File
 	timeStamp string
+	Now       func() time.Time
 }
 
 func (w *DiskWriter) WriteBatch(batch LogBatch) error {
-	ts := time.Now().Format("20060102-1504")
+	ts := w.Now().Truncate(5 * time.Minute).Format("20060102-1504")
 
 	if w.current == nil || w.timeStamp != ts {
 		if w.current != nil {
@@ -39,7 +40,7 @@ func (w *DiskWriter) WriteBatch(batch LogBatch) error {
 
 	for _, line := range batch.Lines {
 		_, err := fmt.Fprintf(w.current, "%s [%s][%s] %s\n",
-			time.Now().Format(time.RFC3339),
+			w.Now().Format(time.RFC3339),
 			batch.Metadata["hostname"],
 			batch.Metadata["source"],
 			line,
