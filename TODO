@@ -9,10 +9,20 @@ Agent:
 Server:
     - Better operational logging 
     - Save to object storage
-    - Save effeciently
+    - Save effeciently change file format?
+    - Configuration / Hot Realoading 
+    
 
 Both:
     - Write unit tests
     - Metrics from both
     - Split into packages
     - find a way to generate logs
+    - hot reloading config
+    - Koanf for config
+
+
+
+Future:
+    Server:
+        Continue Tests
