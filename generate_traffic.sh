@@ -1,28 +1,20 @@
 #!/bin/bash
 
-# Script to generate HTTP traffic for nginx log testing
+# Generate fake Apache access logs using flog
+# Writes two log files to ./logs/
 
-NGINX_URL="http://localhost:8080"
-ITERATIONS=20
-SLEEP_BETWEEN=0.5  # seconds
+LOGS_DIR="$(dirname "$0")/logs"
+mkdir -p "$LOGS_DIR"
 
-echo "Generating traffic to $NGINX_URL..."
+echo "Writing Apache logs to $LOGS_DIR..."
 
-for i in $(seq 1 $ITERATIONS); do
-    # Valid requests to generate access logs
-    curl -s -o /dev/null "$NGINX_URL/" &
-    curl -s -o /dev/null "$NGINX_URL/index.html" &
+flog -f apache_common -t log -o "$LOGS_DIR/apache1.log" -n 10000 -w &
+PID1=$!
 
-    # 404s to generate error logs
-    curl -s -o /dev/null "$NGINX_URL/missing-page-$(date +%s)" &
-    curl -s -o /dev/null "$NGINX_URL/api/users/$i" &
+flog -f apache_common -t log -o "$LOGS_DIR/apache2.log" -n 10000 -w &
+PID2=$!
 
-    # Random user agents
-    curl -s -o /dev/null -A "Mozilla/5.0 (Test Bot $i)" "$NGINX_URL/" &
+echo "Log generators running (PIDs: $PID1, $PID2). Press Ctrl+C to stop."
 
-    echo "Iteration $i/$ITERATIONS"
-    sleep $SLEEP_BETWEEN
-done
-
+trap "kill $PID1 $PID2 2>/dev/null; echo 'Stopped.'" EXIT
 wait
-echo "Traffic generation complete!"

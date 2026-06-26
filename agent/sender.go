@@ -13,7 +13,7 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-func sendBatch(lines []LogLine) error {
+func (agent *Agent) sendBatch(lines []LogLine) error {
 	hostName, _ := os.Hostname()
 
 	grouped := make(map[string][]string)
@@ -45,7 +45,7 @@ func sendBatch(lines []LogLine) error {
 		}
 
 		payload := buf.Bytes()
-		req, err := http.NewRequest(http.MethodPost, "http://localhost:8080/logs", bytes.NewReader(payload))
+		req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://%s/logs", agent.serverUrl), bytes.NewReader(payload))
 
 		if err != nil {
 			return err
@@ -79,12 +79,12 @@ func sendBatch(lines []LogLine) error {
 	return nil
 }
 
-func sendWithRetry(lines []LogLine) {
+func (agent *Agent) sendWithRetry(lines []LogLine) {
 	backoff := time.Second
 	maxBackoff := 30 * backoff
 
 	for {
-		err := sendBatch(lines)
+		err := agent.sendBatch(lines)
 
 		if err == nil {
 			return

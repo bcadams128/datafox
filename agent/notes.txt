@@ -1,0 +1,104 @@
+Config Hot-Reload — Design Notes
+================================
+
+Goal
+----
+Reload config.toml while the agent is running, without a restart, and without
+data races between the file-watch goroutine and the readers.
+
+
+Bugs in the original NewConfig()
+--------------------------------
+1. Watch callback had `return nil, err` but the koanf callback signature
+   (func(event any, err error)) returns nothing -> would not compile.
+2. Initial config was loaded into koanf but never Unmarshal'd, so the returned
+   *Config was all zero values. Unmarshal only happened inside the watch
+   callback (i.e. on the *next* file change).
+3. Even after reload, main()/Agent had already copied values out at startup
+   (logs, serverUrl, offsetPath), so a reload mutated a struct nobody re-read.
+   The hot reload was a no-op by construction.
+4. Data race: watch goroutine mutated `cfg` in place while readers read the
+   same fields, with no synchronization. Also reassigned the global `k`.
+
+
+Final design: ConfigStore + atomic.Pointer[Config]
+--------------------------------------------------
+- Config is treated as IMMUTABLE once published. We never mutate a *Config that
+  readers can see.
+- ConfigStore holds an atomic.Pointer[Config]. Load() returns the current
+  snapshot; the watch callback builds a brand-new *Config and Store()s it.
+- parseConfig() uses a FRESH koanf.New() each call. Fresh matters: koanf merges
+  on Load rather than replacing, so reusing an instance leaves deleted keys
+  lingering in memory (koanf issue #77).
+- On reload, if parse fails we log and keep the previous (last-good) config
+  instead of clobbering with garbage.
+
+Why atomic.Pointer instead of a mutex:
+- Config is read-often (every send), written-rarely (only on file edit). An
+  atomic pointer Load is a lock-free read - cheaper than even an RWMutex read
+  lock, and the writer never blocks readers (it swaps a pointer).
+- Immutability gives consistency for free: one Load() hands you a self-consistent
+  snapshot (server/port/batch_size all from the same reload), so no torn reads.
+- A mutex version (e.g. the OneUptime article) also works and is correct - but it
+  must return a COPY of the struct under the read lock to be safe (returning a
+  pointer to the internal struct after unlocking = race). For a whole-config
+  swap, the pointer-swap is the lighter version of the same idea.
+- Caveat either way: a struct copy is shallow. LogPaths ([]string) copies the
+  slice header, not the backing array. Safe here only because we never mutate a
+  published config in place ("never mutate after publish").
+
+
+How to read config (the usage rule)
+-----------------------------------
+- Load() is cheap (one atomic pointer read - no parse, no lock, no copy). The
+  watch goroutine already did the parsing and swapped the pointer.
+- Load at the POINT OF USE for values you want hot; don't cache them in a field.
+  A value refreshes at the natural cadence of the code path that reads it.
+- Hand long-lived components the STORE (*ConfigStore), not a snapshot. A store
+  can always get current values; a snapshot is frozen at hand-off time.
+- Load once per logical operation into a local, then use that local throughout,
+  so all fields in that operation are mutually consistent.
+
+  func (a *Agent) sendBatch(...) {
+      cfg := a.cfg.Load()        // fresh, at the moment of sending
+      url := cfg.ServerURL()
+  }
+
+- Long-running loops: Load inside the loop body each iteration, not once before
+  the loop, if you want them to track changes.
+
+
+What's hot vs startup-only (current scope)
+------------------------------------------
+HOT (Load at point of use):
+  - server, port  -> read in sendBatch (it builds the URL fresh per call)
+  - batch_size    -> read in the batch loop (replaces the hardcoded `>= 10`;
+                     this field was previously dead/unused)
+
+STARTUP-ONLY (Load once in Run, snapshot):
+  - log_paths     -> changing it needs tailer start/stop lifecycle (not built
+                     yet). Reload logs a "restart required" warning instead of
+                     silently ignoring.
+  - offset_path   -> same; warns on change.
+
+Open question: if batch_size is missing/0, `>= 0` flushes every line. Decide:
+default to 10 when unset, or treat 0 as "time-ticker only".
+
+
+Possible follow-ups
+-------------------
+- Debounce the watcher (editors fire multiple write events per save).
+- Dynamic tailer lifecycle so log_paths becomes hot too.
+
+
+References
+----------
+- koanf README - file Watch live-reload example + "not goroutine safe ... needs
+  mutex locking" note: https://github.com/knadh/koanf/blob/master/README.md
+- koanf issue #77 - Watch doesn't remove deleted keys (why fresh instance):
+  https://github.com/knadh/koanf/issues/77
+- OneUptime - Hot-Reload Configuration in Go Without Restarts (mutex/RWMutex +
+  copy-on-read, fsnotify+Viper, validation, debouncing):
+  https://oneuptime.com/blog/post/2026-01-25-hot-reload-configuration-go-without-restarts/view
+- The Coding Gopher - Mutex or Atomics? (lock-free config swap):
+  https://thecodinggopher.substack.com/p/mutex-or-atomics-choosing-the-right

@@ -83,18 +83,18 @@ func (a *Agent) Run(ctx context.Context) error {
 		case line, ok := <-out:
 			if !ok {
 				if len(batch) > 0 {
-					sendWithRetry(batch)
+					a.sendWithRetry(batch)
 				}
 				return nil
 			}
 			batch = append(batch, line)
 			if len(batch) >= 10 {
-				sendWithRetry(batch)
+				a.sendWithRetry(batch)
 				batch = nil
 			}
 		case <-batchticker.C:
 			if len(batch) > 0 {
-				sendWithRetry(batch)
+				a.sendWithRetry(batch)
 				batch = nil
 			}
 		case <-ctx.Done():

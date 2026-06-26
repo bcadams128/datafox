@@ -17,9 +17,10 @@ Both:
     - Write unit tests
     - Metrics from both
     - Split into packages
-    - find a way to generate logs
     - hot reloading config
     - Koanf for config
+    - Review config to make sure we understand. 
+    - Logpath hot config update will take refactoring
 
 
 

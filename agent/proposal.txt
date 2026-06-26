@@ -1,0 +1,143 @@
+Hot-Reloading log_paths — Design Proposal
+=========================================
+
+Today
+-----
+Each tailer gets its own goroutine running Poll(ctx, out), all spawned once in
+Run() (agent.go:43-60), all writing to one shared `out` channel. The set of
+tailers is fixed at startup. The offset-saver goroutine reads the `tailers`
+slice every 2s via TailersToOffsets.
+
+To make log_paths hot we turn the one-shot spawn into a RECONCILE LOOP: diff the
+desired path set against the running tailers, start new ones, stop removed ones.
+
+
+The four problems to solve
+--------------------------
+1. Per-tailer cancellation. Today every tailer shares the root ctx, so they can
+   only be stopped all at once. To stop ONE tailer (a removed path) each tailer
+   needs its own context.WithCancel derived from the root ctx.
+2. A registry of what's running, keyed by path, so you can diff desired vs live.
+3. Thread-safety on that registry. The offset-saver goroutine reads the tailer
+   set while the reconciler mutates it -> needs a mutex (or single-owner).
+4. Shutdown / out close. Current `wg.Wait(); close(out)` (agent.go:62-65)
+   assumes a fixed set. With a changing set you can't close `out` on tailer
+   completion; rely on the batch loop's existing ctx.Done() exit instead.
+
+
+A small manager that owns the tailers
+-------------------------------------
+type tailerHandle struct {
+	t      *Tailer
+	cancel context.CancelFunc
+}
+
+type TailerManager struct {
+	mu      sync.Mutex
+	running map[string]*tailerHandle // keyed by path
+	out     chan LogLine
+	offsets *Offset
+	rootCtx context.Context
+	wg      *sync.WaitGroup
+}
+
+// Reconcile brings the running set in line with the desired paths.
+func (m *TailerManager) Reconcile(desired []string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	want := make(map[string]bool, len(desired))
+	for _, p := range desired {
+		want[p] = true
+	}
+
+	// start tailers for paths we want but aren't running
+	for _, p := range desired {
+		if _, ok := m.running[p]; ok {
+			continue
+		}
+		t, err := NewLogTailer(p, m.offsets)
+		if err != nil {
+			log.Printf("tailer start failed for %s: %v", p, err)
+			continue
+		}
+		ctx, cancel := context.WithCancel(m.rootCtx)
+		m.running[p] = &tailerHandle{t: t, cancel: cancel}
+
+		m.wg.Add(1)
+		go func(t *Tailer) {
+			defer m.wg.Done()
+			if err := t.Poll(ctx, m.out); err != nil {
+				log.Printf("tailer %s exited: %v", t.path, err)
+			}
+		}(t)
+		log.Printf("started tailer for %s", p)
+	}
+
+	// stop tailers we're running but no longer want
+	for p, h := range m.running {
+		if want[p] {
+			continue
+		}
+		h.cancel()           // signals Poll's ctx.Done -> goroutine returns
+		SaveOffsets(...)     // persist its final offset before dropping (see note 1)
+		delete(m.running, p)
+		log.Printf("stopped tailer for %s", p)
+	}
+}
+
+// Snapshot returns the live tailers for offset saving (replaces the raw slice).
+func (m *TailerManager) Snapshot() []*Tailer {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]*Tailer, 0, len(m.running))
+	for _, h := range m.running {
+		out = append(out, h.t)
+	}
+	return out
+}
+
+
+Driving it: poll vs event
+--------------------------
+POLL-DRIVEN (recommended): add a reconcile ticker in Run() and each tick call
+manager.Reconcile(discover(a.cfg.Load().LogPaths)). Simpler, no callback wiring.
+Bonus: since discover expands the glob (/logs/*.log), polling also picks up NEW
+FILES that match an existing glob, not just config edits. Cost: a few seconds of
+latency.
+
+	reconcileTicker := time.NewTicker(5 * time.Second)
+	defer reconcileTicker.Stop()
+	// ... in the select:
+	case <-reconcileTicker.C:
+	    paths, _ := discover(a.cfg.Load().LogPaths)
+	    manager.Reconcile(paths)
+
+The offset-saver goroutine switches from the raw `tailers` slice to
+manager.Snapshot().
+
+EVENT-DRIVEN: have the config watch callback poke a channel the agent selects
+on. Lower latency, but only reacts to config-file changes (not new files
+appearing) and couples ConfigStore to the agent.
+
+Since we already glob, poll-driven gives more for less.
+
+
+Two things to decide
+--------------------
+1. Offsets for removed paths. TailersToOffsets only includes LIVE tailers, so
+   stopping a path drops it from the offset file -> on restart it would re-read
+   from position 0 if it ever returns. If that matters, keep stopped paths' last
+   offset in a separate retained map and merge it when saving. Otherwise accept
+   the reset and document it.
+2. The out close / shutdown path. Drop `go func(){ wg.Wait(); close(out) }()`.
+   With a dynamic set, shutdown is: root ctx cancels -> all tailer goroutines
+   return -> the batch loop exits on its existing ctx.Done() case. Make sure
+   that case flushes the final `batch` before returning (it currently only saves
+   offsets -- small existing gap worth closing while we're here).
+
+
+Scope
+-----
+Real chunk of work (per-tailer contexts, mutex-guarded registry, reconcile loop,
+shutdown rework) vs the trivial hot fields (server/port/batch_size) already done.
