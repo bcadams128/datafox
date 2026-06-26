@@ -72,11 +72,7 @@ func TailersToOffsets(tailers []*Tailer) *Offset {
 	o := &Offset{Files: make(map[string]OffsetState)}
 	for _, t := range tailers {
 		o.Version = 1
-		o.Files[t.path] = OffsetState{
-			Path:   t.path,
-			Inode:  t.inode,
-			Offset: t.offset,
-		}
+		o.Files[t.path] = t.State()
 	}
 	return o
 }

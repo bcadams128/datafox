@@ -141,3 +141,6 @@ Scope
 -----
 Real chunk of work (per-tailer contexts, mutex-guarded registry, reconcile loop,
 shutdown rework) vs the trivial hot fields (server/port/batch_size) already done.
+
+
+

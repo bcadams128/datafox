@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -14,8 +13,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
 	}
-	cfg := config.Load()
-	var logs = cfg.LogPaths
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -28,8 +25,7 @@ func main() {
 		cancel()
 	}()
 
-	serverUrl := fmt.Sprintf("%s:%d", cfg.Server, cfg.Port)
-	agent := NewAgent(logs, cfg.OffsetPath, serverUrl)
+	agent := NewAgent(config)
 
 	if err := agent.Run(ctx); err != nil {
 		log.Fatal(err)

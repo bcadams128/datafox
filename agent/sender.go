@@ -45,7 +45,7 @@ func (agent *Agent) sendBatch(lines []LogLine) error {
 		}
 
 		payload := buf.Bytes()
-		req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://%s/logs", agent.serverUrl), bytes.NewReader(payload))
+		req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://%s/logs", agent.cfg.Load().Server), bytes.NewReader(payload))
 
 		if err != nil {
 			return err
