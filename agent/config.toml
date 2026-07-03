@@ -1,5 +1,5 @@
 [agent]
-log_paths   = ["/var/log/apt/*.log", "/home/ben/projects/datafox/logs/apache2.log", "/home/ben/projects/datafox/logs/apache1.log"]
+log_paths   = ["/var/log/apt/*.log", "/home/ben/projects/datafox/logs/apache1.log", "/home/ben/projects/datafox/logs/apache2.log"]
 offset_path = "offset.backup"
 server      = "localhost"
 port        = 8080
