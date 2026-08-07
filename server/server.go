@@ -4,13 +4,15 @@ import (
 	"compress/gzip"
 	"datafox/server/pkg/disk"
 	"io"
+	"log"
 	"net/http"
 
 	"github.com/vmihailenco/msgpack/v5"
 )
 
 type Server struct {
-	ingestChan chan<- disk.LogBatch
+	//parquet change
+	ingestChan chan<- disk.RawLogBatch
 }
 
 func (s *Server) routes(mux *http.ServeMux) {
@@ -23,6 +25,7 @@ func (s *Server) handlePing(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
+	log.Printf("log endpoint hit")
 	var reader io.Reader = r.Body
 	defer r.Body.Close()
 
@@ -37,11 +40,12 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	//Reject if not gzip
 
-	var batch disk.LogBatch
+	var batch disk.RawLogBatch
 	if err := msgpack.NewDecoder(reader).Decode(&batch); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	log.Println("Log Batch sent to channel")
 
 	select {
 	case s.ingestChan <- batch:
