@@ -4,9 +4,11 @@ import (
 	"context"
 	"datafox/server/pkg/types"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/parquet-go/parquet-go"
@@ -89,4 +91,42 @@ func DiskWorker(ch <-chan RawLogBatch, w *DiskWriter) {
 			log.Printf("disk write failed: %v", err)
 		}
 	}
+}
+
+func Read(filename string, source string) ([]types.LogRecord, error) {
+	f, err := os.Open(filename)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	schema := parquet.SchemaOf(types.LogRecord{})
+	sourceCol, _ := schema.Lookup("source")
+
+	reader := parquet.NewReader(f, schema)
+	filtered := parquet.FilterRowReader(reader, func(row parquet.Row) bool {
+		return strings.Contains(row[sourceCol.ColumnIndex].String(), source)
+	})
+
+	var matches []types.LogRecord
+	buf := make([]parquet.Row, 20)
+
+	for {
+		n, err := filtered.ReadRows(buf)
+		for _, row := range buf[:n] {
+			var rec types.LogRecord
+			if rerr := schema.Reconstruct(&rec, row); rerr != nil {
+				return nil, rerr
+			}
+			matches = append(matches, rec)
+		}
+		if err == io.EOF {
+
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	return matches, nil
 }

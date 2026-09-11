@@ -7,19 +7,26 @@ Agent:
 
 Server:
     - Better operational logging 
-    - Save to object storage
     - Save effeciently change file format?
     - Configuration / Hot Realoading
     - Store logs for fast querying
         - Parsing
         - Storage and indexing
         - Searching of stored logs
-    
+        - Are we done here?
+    - Rotate parquet files
+    - Object storage / cache retention 
+      - How to manage file cache locally / when to expire remove old files
+
+
 
 Both:
     - Write unit tests
     - Metrics from both
     - Split into packages
+    - Need way more error handling and tests 
+        - Agent: needs to tell us if it can't connect to server /  Maybe pre-flight check that it can connect to server
+        - Server: Needs to tell us if port is bound,  we need logging / metrics on log handle endpoint to know if its being hit
 
 
 Future:
