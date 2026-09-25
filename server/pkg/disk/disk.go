@@ -47,7 +47,7 @@ func RawToEntry(batch RawLogBatch) []types.LogEntry {
 }
 
 func (w *DiskWriter) WriteBatch(logs []types.LogEntry) error {
-	ts := w.Now().Truncate(5 * time.Second).Format("20060102-150405")
+	ts := w.Now().Truncate(60 * time.Second).Format("20060102-150405")
 	log.Printf("Starting new batch log")
 
 	if w.current == nil || w.timeStamp != ts {

@@ -32,3 +32,12 @@ Both:
 Future:
     Server:
         Continue Tests
+
+
+
+NEXT
+Generating good fake data over a time period
+Add start and end to query parms and what format???
+What is the default? 1h
+How do we allow for a timestamp of month, or month/day, or month/day/hour (etc.)
+Can we also support month as a number or word (e.g. 08/2026 or Aug 2026) or relative (-1 day)?

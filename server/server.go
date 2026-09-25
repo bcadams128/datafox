@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	_ "github.com/duckdb/duckdb-go/v2"
 
@@ -19,6 +20,7 @@ import (
 type Server struct {
 	//parquet change
 	ingestChan chan<- disk.RawLogBatch
+	db         *sql.DB
 }
 
 func (s *Server) routes(mux *http.ServeMux) {
@@ -65,29 +67,33 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) readLogs(w http.ResponseWriter, r *http.Request) {
-	db, err := sql.Open("duckdb", "")
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer db.Close()
-
 	q := r.URL.Query()
 	var where []string
 	var args []any
 
-	if v := q.Get("source"); v != "" {
-		where = append(where, "source ILIKE ?")
-		args = append(args, "%"+v+"%")
+	filters := []struct {
+		param  string
+		clause string
+		like   bool
+	}{
+		{"source", "source ILIKE ?", true},
+		{"host", "host = ?", false},
+		{"message", "message ILIKE ?", true},
 	}
-	if v := q.Get("host"); v != "" {
-		where = append(where, "host = ?")
-		args = append(args, v)
+
+	for _, f := range filters {
+		value := q.Get(f.param)
+		if value == "" {
+			continue
+		}
+		if f.like {
+			value = "%" + value + "%" // ILIKE needs wildcards for a substring match, not exact
+		}
+		where = append(where, f.clause)
+		args = append(args, value)
 	}
-	if v := q.Get("message"); v != "" {
-		where = append(where, "message ILIKE ?")
-		args = append(args, "%"+v+"%")
-	}
+
+	start := time.Now()
 
 	query := "SELECT timestamp, host, source, message FROM 'logs/*.parquet'"
 	if len(where) > 0 {
@@ -95,7 +101,7 @@ func (s *Server) readLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	query += " ORDER BY timestamp"
 
-	rows, err := db.QueryContext(r.Context(), query, args...)
+	rows, err := s.db.QueryContext(r.Context(), query, args...)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -111,6 +117,9 @@ func (s *Server) readLogs(w http.ResponseWriter, r *http.Request) {
 		}
 		results = append(results, rec)
 	}
+
+	elapsed := time.Since(start)
+	log.Printf("query took %dms, %d rows", elapsed.Milliseconds(), len(results))
 	if err := rows.Err(); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

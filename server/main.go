@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"datafox/server/pkg/disk"
 	"log"
 	"net/http"
@@ -8,9 +9,14 @@ import (
 )
 
 func main() {
+	db, err := sql.Open("duckdb", "")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
 
 	ingestChan := make(chan disk.RawLogBatch, 1000)
-	srv := &Server{ingestChan: ingestChan}
+	srv := &Server{ingestChan: ingestChan, db: db}
 	mux := http.NewServeMux()
 	srv.routes(mux)
 
