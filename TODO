@@ -16,7 +16,16 @@ Server:
         - Are we done here?
     - Rotate parquet files
     - Object storage / cache retention 
-      - How to manage file cache locally / when to expire remove old files
+      - When to upload files to S3?
+        - When time > X
+        - When file larger than X
+        - When disk space less than X
+    - How to track object store metadata?
+      - In a DB?
+      - Via the object store path directly?  (e.g. <month>/<day>/<hour>/<minute>/)
+    - How to query local tmp files and object store files?  (single logical interface)
+      - Memory mapped files?
+
 
 
 
@@ -36,7 +45,6 @@ Future:
 
 
 NEXT
-Generating good fake data over a time period
 Add start and end to query parms and what format???
 What is the default? 1h
 How do we allow for a timestamp of month, or month/day, or month/day/hour (etc.)

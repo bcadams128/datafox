@@ -1,0 +1,20 @@
+metadata_dir = "/meta"
+data_dir = "/data"
+db_engine = "lmdb"
+
+# Single-node dev cluster: no redundancy, one copy of every object/metadata entry.
+replication_factor = 1
+
+rpc_bind_addr = "[::]:3901"
+rpc_public_addr = "127.0.0.1:3901"
+rpc_secret = "9080a87396f34aa8c550b87113ba9dc873f503f2f15fbde6559469232458adb5"
+
+[s3_api]
+s3_region = "garage"
+api_bind_addr = "[::]:3900"
+root_domain = ".s3.garage.localhost"
+
+[admin]
+api_bind_addr = "[::]:3903"
+admin_token = "2e35c64df105ea3a5363353d715b060c7a2d6dd16b592bed0c50f335aed0e0e6"
+metrics_token = "2e35c64df105ea3a5363353d715b060c7a2d6dd16b592bed0c50f335aed0e0e6"

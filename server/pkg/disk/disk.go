@@ -3,6 +3,7 @@ package disk
 import (
 	"context"
 	"datafox/server/pkg/types"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -20,11 +21,10 @@ type RawLogBatch struct {
 }
 
 type DiskWriter struct {
-	Dir       string
-	current   *os.File
-	writer    *parquet.GenericWriter[types.LogRecord]
-	timeStamp string
-	Now       func() time.Time
+	Dir     string
+	current *os.File
+	writer  *parquet.GenericWriter[types.LogRecord]
+	Now     func() time.Time
 }
 
 type LogStore interface {
@@ -47,29 +47,18 @@ func RawToEntry(batch RawLogBatch) []types.LogEntry {
 }
 
 func (w *DiskWriter) WriteBatch(logs []types.LogEntry) error {
-	ts := w.Now().Truncate(60 * time.Second).Format("20060102-150405")
-	log.Printf("Starting new batch log")
 
-	if w.current == nil || w.timeStamp != ts {
-		if w.current != nil {
-			if err := w.writer.Close(); err != nil {
-				return err
-			}
+	if w.current == nil {
+		ts := w.Now().UTC().Format("20060102-150405.000")
+		path := filepath.Join(w.Dir, fmt.Sprintf("logs-%s.parquet.tmp", ts))
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0644)
 
-			if err := w.current.Close(); err != nil {
-				return err
-			}
-		}
-
-		path := filepath.Join(w.Dir, fmt.Sprintf("logs-%s.parquet", ts))
-		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if err != nil {
 			return err
 		}
 
 		w.current = f
 		w.writer = parquet.NewGenericWriter[types.LogRecord](f)
-		w.timeStamp = ts
 	}
 	logBatch := make([]types.LogRecord, 0, 100_000)
 	for _, log := range logs {
@@ -81,15 +70,51 @@ func (w *DiskWriter) WriteBatch(logs []types.LogEntry) error {
 	return nil
 }
 
+func (w *DiskWriter) rotate() error {
+	if w.current == nil {
+		return nil
+	}
+
+	path := w.current.Name()
+	writerErr := w.writer.Close()
+	fileErr := w.current.Close()
+	w.current = nil
+	w.writer = nil
+
+	if err := errors.Join(writerErr, fileErr); err != nil {
+		return err
+	}
+	return os.Rename(path, strings.TrimSuffix(path, ".tmp"))
+}
+
 func DiskWorker(ch <-chan RawLogBatch, w *DiskWriter) {
 	log.Printf("writing to disk")
 	log.Print(ch)
-	for batch := range ch {
-		log.Printf("Attempting to call RawToEntry")
-		entries := RawToEntry(batch)
-		if err := w.WriteBatch(entries); err != nil {
-			log.Printf("disk write failed: %v", err)
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case batch, ok := <-ch:
+			if !ok {
+				// Channel closes final rotate / close
+				if err := w.rotate(); err != nil {
+					log.Printf("final rotate failed: %v", err)
+				}
+				return
+			}
+			// This is the OK path
+			entries := RawToEntry(batch)
+			if err := w.WriteBatch(entries); err != nil {
+				log.Printf("disk write failed: %v", err)
+			}
+		case <-ticker.C:
+			log.Printf("Log file rotated")
+			if err := w.rotate(); err != nil {
+				log.Printf("rotate failed: %v", err)
+			}
 		}
+
 	}
 }
 

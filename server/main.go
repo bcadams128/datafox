@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"datafox/server/pkg/disk"
+	"datafox/server/pkg/utils"
 	"log"
 	"net/http"
 	"time"
@@ -16,7 +18,12 @@ func main() {
 	defer db.Close()
 
 	ingestChan := make(chan disk.RawLogBatch, 1000)
-	srv := &Server{ingestChan: ingestChan, db: db}
+	ctx := context.Background()
+	objectManager, err := utils.NewObjectManager(ctx)
+	if err != nil {
+		log.Fatal(err)
+	}
+	srv := &Server{ingestChan: ingestChan, db: db, objectManager: objectManager}
 	mux := http.NewServeMux()
 	srv.routes(mux)
 

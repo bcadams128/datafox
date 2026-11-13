@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"datafox/server/pkg/disk"
 	"datafox/server/pkg/types"
+	"datafox/server/pkg/utils"
 	"encoding/json"
 	"io"
 	"log"
@@ -19,8 +20,9 @@ import (
 
 type Server struct {
 	//parquet change
-	ingestChan chan<- disk.RawLogBatch
-	db         *sql.DB
+	ingestChan    chan<- disk.RawLogBatch
+	db            *sql.DB
+	objectManager *utils.ObjectManager
 }
 
 func (s *Server) routes(mux *http.ServeMux) {
