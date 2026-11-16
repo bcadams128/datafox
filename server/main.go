@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	cache "datafox/server/pkg/cache"
 	"datafox/server/pkg/disk"
 	"datafox/server/pkg/utils"
 	"log"
@@ -33,8 +34,14 @@ func main() {
 		Now: time.Now,
 	}
 
+	cache, err := cache.NewCache("./cache")
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	//parquet change
 	go disk.DiskWorker(ingestChan, writer)
+	go utils.RunUploader(ctx, "./logs", cache, objectManager)
 
 	log.Println("Starting Server")
 	http.ListenAndServe("localhost:8080", mux)

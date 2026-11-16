@@ -27,6 +27,10 @@ Server:
       - Memory mapped files?
 
 
+Next:
+    Finishe Cache basic implementaion 
+    File deletion from uploader
+    Queries and use cache first setup download logic if misssing
 
 
 Both:

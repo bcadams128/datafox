@@ -3,4 +3,4 @@ log_paths   = ["/var/log/apt/*.log", "/home/ben/projects/datafox/logs/*"]
 offset_path = "offset.backup"
 server      = "localhost"
 port        = 8080
-batch_size  = 10
+batch_size  = 40
